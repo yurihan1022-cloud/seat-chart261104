@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>공연장 좌석표</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: toolbar on top; seat map and notes on the left, grade-by-grade attendance panel on the right; the map scrolls sideways on narrow screens. */
+:root {
+  --bg: #f2f4f7; --surface: #ffffff; --fg: #1d2330; --muted: #5f6b7c; --line: #d9dee6;
+  --accent: #2563eb; --field: #ffffff; --field-line: #aab3c0;
+  --filled: #e7f0ff; --filled-line: #8fb3ee; --pill: #e8ebf0;
+  --sky: #cde7fa; --orange: #fcd7a5; --green: #d3f0a4; --yellow: #fff2a0;
+  --danger: #b42318; --ok: #1d7a3c; --warn: #b54708;
+  --font: "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c; --surface: #1c2027; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2e3541;
+    --accent: #7aa5ff; --field: #12151a; --field-line: #4a5466;
+    --filled: #1e3050; --filled-line: #4a72b8; --pill: #2a303b;
+    --sky: #23465f; --orange: #5f4322; --green: #3e5a22; --yellow: #5b5421;
+    --danger: #ff8a80; --ok: #6fd08c; --warn: #f5b061;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c; --surface: #1c2027; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2e3541;
+  --accent: #7aa5ff; --field: #12151a; --field-line: #4a5466;
+  --filled: #1e3050; --filled-line: #4a72b8; --pill: #2a303b;
+  --sky: #23465f; --orange: #5f4322; --green: #3e5a22; --yellow: #5b5421;
+  --danger: #ff8a80; --ok: #6fd08c; --warn: #f5b061;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1640px; margin: 0 auto; }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.titleblock { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; min-width: 0; }
+h1 { font-size: 19px; font-weight: 700; margin: 0; }
+.count { font-size: 13px; color: var(--muted); }
+.actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-right: 4px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.state[data-s="live"] .dot, .state[data-s="saved"] .dot { background: var(--ok); }
+.state[data-s="dirty"] .dot, .state[data-s="saving"] .dot { background: var(--warn); }
+.state[data-s="error"] .dot, .state[data-s="offline"] .dot { background: var(--danger); }
+
+.btn { font: inherit; font-size: 13px; border: 1px solid var(--field-line); background: var(--surface); color: var(--fg); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+.btn:hover { background: var(--pill); }
+.btn.primary { background: var(--accent); color: var(--surface); border-color: var(--accent); font-weight: 700; padding: 7px 18px; }
+.btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+.btn:disabled { opacity: .6; cursor: default; }
+.btn.danger { color: var(--danger); border-color: var(--danger); }
+.btn.armed { background: var(--danger); color: var(--surface); }
+.btn:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.banner { background: var(--pill); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+
+.main { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.left { flex: 1 1 640px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+
+.chart { padding: 24px 12px 14px; overflow-x: auto; }
+.stage-arc {
+  width: 320px; height: 96px; margin: 0 auto 16px;
+  border: 3px solid var(--fg); border-bottom: none; border-radius: 160px 160px 0 0;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;
+}
+.stage-arc span { font-weight: 700; letter-spacing: 2px; font-size: 17px; }
+
+.section-labels, .venue-row { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: max-content; }
+.section-labels { margin-bottom: 6px; }
+.venue-row { padding: 2px 0; }
+.lab { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--pill); border-radius: 10px; padding: 2px 14px; }
+.slot-al, .slot-ar, .slot-ac { display: flex; flex-shrink: 0; }
+.slot-al { width: 238px; justify-content: flex-end; }
+.slot-ar { width: 238px; justify-content: flex-start; }
+.slot-ac { width: 710px; justify-content: center; }
+.section-labels .slot-al, .section-labels .slot-ar, .section-labels .slot-ac { justify-content: center; }
+.slot-gap { width: 18px; flex-shrink: 0; }
+.row-num { width: 18px; text-align: center; font-size: 10px; font-weight: 700; color: var(--muted); flex-shrink: 0; }
+
+.block { display: flex; gap: 2px; padding: 3px 4px; border-radius: 3px; }
+.bg-sky { background: var(--sky); }
+.bg-orange { background: var(--orange); }
+.bg-green { background: var(--green); }
+.bg-yellow { background: var(--yellow); }
+
+.seat { display: flex; flex-direction: column; align-items: center; width: 27px; flex-shrink: 0; }
+.seat-num { font-size: 8px; line-height: 1.1; color: var(--muted); margin-bottom: 1px; }
+.seat-num.wc { color: var(--accent); font-weight: 700; }
+input.seat-input {
+  width: 26px; height: 20px; padding: 0; text-align: center;
+  font-family: var(--font); font-size: 9.5px; font-variant-numeric: tabular-nums;
+  color: var(--fg); background: var(--field); border: 1px solid var(--field-line); border-radius: 2px;
+}
+input.seat-input.filled { background: var(--filled); border-color: var(--filled-line); }
+
+.gate-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 10px; min-width: max-content; padding: 0 8px; }
+
+.legend { display: flex; gap: 6px 16px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 10px 2px 0; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
+
+.notes { margin-top: 16px; padding: 14px 16px; }
+.panel-title { font-size: 15px; font-weight: 700; margin: 0 0 8px; }
+textarea.notes-text {
+  width: 100%; min-height: 110px; resize: vertical; padding: 10px 12px;
+  font-family: var(--font); font-size: 13px; line-height: 1.6;
+  color: var(--fg); background: var(--field); border: 1px solid var(--field-line); border-radius: 6px;
+}
+
+.attendance { flex: 0 0 350px; width: 350px; padding: 14px; }
+.total { font-size: 13px; font-weight: 700; text-align: center; background: var(--filled); border: 1px solid var(--filled-line); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+.grade { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; }
+.grade:last-child { margin-bottom: 0; }
+.grade > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; }
+.grade > summary::-webkit-details-marker { display: none; }
+.grade > summary::before { content: "▾"; color: var(--muted); margin-right: 6px; font-size: 12px; }
+.grade:not([open]) > summary::before { content: "▸"; }
+.grade-name { font-size: 14px; font-weight: 700; margin-right: auto; }
+.grade-sum { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.grade-body { padding: 0 12px 6px; }
+.class-card { padding: 6px 0; border-top: 1px solid var(--line); }
+.class-line { display: flex; align-items: center; gap: 8px; }
+.class-name { width: 30px; font-size: 13px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+.class-enrolled { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+input.enrolled-input {
+  width: 48px; height: 24px; padding: 0 4px; text-align: center; font-family: var(--font); font-size: 12px;
+  color: var(--fg); background: var(--field); border: 1px solid var(--field-line); border-radius: 4px;
+}
+.present { font-size: 12px; color: var(--fg); white-space: nowrap; }
+.present b { color: var(--ok); font-weight: 700; }
+.add-absence { margin-left: auto; font: inherit; font-size: 11px; color: var(--muted); background: transparent; border: 1px dashed var(--field-line); border-radius: 4px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+.add-absence:hover { background: var(--pill); }
+.absence-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px 38px; }
+.absence-row { display: flex; gap: 4px; align-items: center; }
+input.absence-id, input.absence-reason {
+  height: 24px; padding: 0 6px; font-family: var(--font); font-size: 11px;
+  color: var(--fg); background: var(--field); border: 1px solid var(--field-line); border-radius: 4px; min-width: 0;
+}
+input.absence-id { width: 58px; text-align: center; }
+input.absence-reason { flex: 1; }
+.remove-btn { width: 22px; height: 22px; border: none; background: transparent; color: var(--danger); font-size: 15px; line-height: 1; cursor: pointer; flex-shrink: 0; border-radius: 4px; }
+.remove-btn:hover { background: var(--pill); }
+.readonly .add-absence, .readonly .remove-btn { display: none; }
+.readonly input, .readonly textarea { cursor: default; }
+
+@media (max-width: 720px) {
+  .attendance { flex-basis: 100%; width: 100%; }
+}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header class="toolbar">
+    <div class="titleblock">
+      <h1>공연장 좌석표</h1>
+      <span class="count" id="seatCount">입력된 좌석 0석</span>
+    </div>
+    <div class="actions">
+      <span class="state" id="state" data-s="connecting" role="status" aria-live="polite"><i class="dot" aria-hidden="true"></i><span id="stateText">연결 중…</span></span>
+      <button class="btn primary" id="saveBtn" type="button">저장</button>
+      <button class="btn" id="exportSeats" type="button" hidden>좌석 명단 내보내기</button>
+      <button class="btn" id="exportAtt" type="button" hidden>출결현황 내보내기</button>
+      <button class="btn danger" id="clearBtn" type="button" hidden>전체 지우기</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="main">
+    <div class="left">
+      <div class="panel chart">
+        <div class="stage-arc"><span>STAGE</span></div>
+        <div class="section-labels">
+          <div class="slot-al"><span class="lab">AL</span></div>
+          <div class="slot-gap"></div>
+          <div class="slot-ac"><span class="lab">AC</span></div>
+          <div class="slot-gap"></div>
+          <div class="slot-ar"><span class="lab">AR</span></div>
+        </div>
+        <div id="rows"></div>
+        <div class="gate-row"><span>GATE B101</span><span>GATE B104</span></div>
+      </div>
+      <div class="legend">
+        <span><span class="swatch bg-orange"></span>주황</span>
+        <span><span class="swatch bg-sky"></span>하늘색</span>
+        <span><span class="swatch bg-green"></span>연두색</span>
+        <span><span class="swatch bg-yellow"></span>노란색</span>
+      </div>
+      <div class="panel notes">
+        <h2 class="panel-title">전달사항</h2>
+        <textarea class="notes-text" id="notesText" aria-label="전달사항" placeholder="예: 공연 시작 10분 전까지 착석 완료. 비상시 B101, B104 게이트로 이동."></textarea>
+      </div>
+    </div>
+
+    <aside class="panel attendance">
+      <h2 class="panel-title">학년·반별 출결현황</h2>
+      <div class="total" id="total">전교 재적수 - 명 · 출석수 - 명</div>
+      <div id="classCards"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var GRADES = [1, 2, 3];
+  var CLASS_COUNT = { 1: 7, 2: 7, 3: 7 };
+
+  var rowDefs = [
+    { n: 1,  al: 'wheel', ac: 22, ar: 'wheel' },
+    { n: 2,  ac: 21 },
+    { n: 3,  al: 8, ac: 22, ar: 8 },
+    { n: 4,  al: 8, ac: 23, ar: 8 },
+    { n: 5,  al: 8, ac: 22, ar: 8 },
+    { n: 6,  al: 8, ac: 23, ar: 8 },
+    { n: 7,  al: 8, ac: 24, ar: 8 },
+    { n: 8,  al: 7, ac: 23, ar: 7 },
+    { n: 9,  al: 4, ac: 24, ar: 4 },
+    { n: 10, al: 2, ac: 23, ar: 2 },
+    { n: 11, ac: 24 },
+    { n: 12, ac: 23 },
+    { n: 13, ac: 20 },
+    { n: 14, ac: 19 },
+    { n: 15, ac: 18 },
+    { n: 16, ac: 17 },
+    { n: 17, ac: 16 },
+    { n: 18, ac: 15 },
+    { n: 19, ac: 14 },
+    { n: 20, ac: 15 },
+    { n: 21, ac: 14 }
+  ];
+
+  function colorFor(section, n) {
+    if (section === 'AL') return (n >= 3 && n <= 10) ? 'bg-sky' : '';
+    if (section === 'AR') {
+      if (n >= 3 && n <= 9) return 'bg-sky';
+      if (n === 10) return 'bg-green';
+      return '';
+    }
+    if (n <= 7) return 'bg-orange';
+    if (n === 8) return 'bg-green';
+    if (n <= 11) return 'bg-sky';
+    return 'bg-yellow';
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var readOnly = false;
+  var API = '/api/state';
+  var pollTimer = null, pollBusy = false;
+  var seatInputs = [];
+  var seatRemote = {};
+  var seatDirty = {};
+  var seatTimers = {};
+  var chains = {};
+  var inflight = 0;
+  var state = 'connecting';
+  var classKeys = [];
+  var classMeta = {};
+  var classState = {};
+  var classDirty = {};
+  var classVer = {};
+  var classTimers = {};
+  var classEls = {};
+  var gradeEls = {};
+  var notesDirty = false;
+  var notesVer = 0;
+  var notesTimer = null;
+  var notesEl = $('notesText');
+
+  GRADES.forEach(function (g) {
+    for (var n = 1; n <= CLASS_COUNT[g]; n++) {
+      var key = 'g' + g + 'c' + n;
+      classKeys.push(key);
+      classMeta[key] = { g: g, n: n };
+    }
+  });
+
+  function setState(s, text) {
+    state = s;
+    var labels = {
+      connecting: '연결 중…', live: '실시간 연결됨', dirty: '입력 중…',
+      saving: '저장 중…', saved: '저장됨', error: '저장 실패', offline: '연결 안 됨'
+    };
+    $('state').setAttribute('data-s', s);
+    $('stateText').textContent = text || labels[s] || '';
+  }
+
+  function showBanner(text) {
+    var b = $('banner');
+    b.textContent = text;
+    b.hidden = !text;
+  }
+
+  function setReadOnly(flag, message) {
+    readOnly = flag;
+    $('app').classList.toggle('readonly', flag);
+    seatInputs.forEach(function (i) { i.readOnly = flag; });
+    notesEl.readOnly = flag;
+    classKeys.forEach(function (key) {
+      classEls[key].enrolled.readOnly = flag;
+      renderAbsences(key);
+    });
+    if (flag && message) showBanner(message);
+  }
+
+  function enqueue(key, fn) {
+    var p = (chains[key] || Promise.resolve()).then(fn).catch(onWriteError);
+    chains[key] = p;
+    return p;
+  }
+
+  function trackWrite(promise) {
+    inflight++;
+    setState('saving');
+    return promise.then(function (r) {
+      inflight--;
+      if (inflight === 0) setState('saved', '저장됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
+      return r;
+    }, function (e) {
+      inflight--;
+      throw e;
+    });
+  }
+
+  function describeError(e) {
+    var st = e && e.status, code = e && e.code;
+    if (code === 'no_storage') return '저장소(Redis)가 연결되지 않았어요. Vercel에서 Upstash Redis를 프로젝트에 연결한 뒤 Redeploy 해 주세요.';
+    if (st === 404) return '서버 API(/api/state)를 찾을 수 없어요(404). 파일 위치가 api/state.js 인지 확인하고 다시 배포해 주세요.';
+    if (st === 429 || code === 'rate_limited') return '요청이 너무 많거나 저장소 사용 한도에 도달했어요. 잠시 뒤 다시 저장해 주세요.' + (e.detail ? ' [' + e.detail + ']' : '');
+    if (st) return '서버 오류(' + st + ')로 저장하지 못했어요.' + (e.detail ? ' [' + e.detail + ']' : '') + ' Vercel의 Logs를 확인해 주세요.';
+    return '서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.';
+  }
+
+  function onWriteError(e) {
+    showBanner(describeError(e));
+    setState('error', '저장 실패');
+  }
+
+  function httpError(r) {
+    return r.json().catch(function () { return {}; }).then(function (j) {
+      var err = new Error('http ' + r.status);
+      err.status = r.status;
+      err.code = j.code || '';
+      err.detail = j.detail || '';
+      throw err;
+    });
+  }
+
+  // 서버에 쓰기 요청 보내기
+  function send(payload) {
+    return fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      if (r.ok) { showBanner(''); return r.json().catch(function () { return {}; }); }
+      return httpError(r);
+    });
+  }
+
+  function onSubError(e) {
+    setState('offline', '연결 끊김 · 재시도 중');
+    showBanner(describeError(e));
+  }
+
+  function makeSeat(section, rowNum, key, label, isWheel) {
+    var seatId = section + rowNum + '_' + key;
+    var wrap = document.createElement('div');
+    wrap.className = 'seat';
+    var lbl = document.createElement('div');
+    lbl.className = 'seat-num' + (isWheel ? ' wc' : '');
+    lbl.textContent = label;
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'seat-input';
+    inp.maxLength = 6;
+    inp.autocomplete = 'off';
+    inp.setAttribute('inputmode', 'numeric');
+    inp.id = 'seat-' + seatId;
+    inp.dataset.seatId = seatId;
+    inp.dataset.section = section;
+    inp.dataset.row = rowNum;
+    inp.dataset.seat = isWheel ? '휠체어' + key.slice(1) : key;
+    inp.dataset.idx = String(seatInputs.length);
+    inp.setAttribute('aria-label', section + ' ' + rowNum + '열 ' + (isWheel ? '휠체어석 ' + key.slice(1) : key + '번') + ' 학번');
+    inp.addEventListener('input', function () { onSeatInput(seatId, inp); });
+    inp.addEventListener('change', function () { flushSeat(seatId, inp); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var next = seatInputs[+inp.dataset.idx + 1];
+        if (next) next.focus();
+      }
+    });
+    seatInputs.push(inp);
+    wrap.appendChild(lbl);
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function buildBlock(section, rowNum, count) {
+    var block = document.createElement('div');
+    block.className = 'block ' + colorFor(section, rowNum);
+    if (count === 'wheel') {
+      for (var w = 1; w <= 4; w++) block.appendChild(makeSeat(section, rowNum, 'W' + w, '휠' + w, true));
+    } else {
+      for (var s = 1; s <= count; s++) block.appendChild(makeSeat(section, rowNum, String(s), String(s), false));
+    }
+    return block;
+  }
+
+  function buildSeats() {
+    var rowsEl = $('rows');
+    rowDefs.forEach(function (rd) {
+      var rowEl = document.createElement('div');
+      rowEl.className = 'venue-row';
+
+      var leftLabel = document.createElement('div');
+      leftLabel.className = 'row-num';
+      leftLabel.textContent = rd.n;
+      var rightLabel = document.createElement('div');
+      rightLabel.className = 'row-num';
+      rightLabel.textContent = rd.n;
+
+      var slotAL = document.createElement('div');
+      slotAL.className = 'slot-al';
+      if (rd.al) slotAL.appendChild(buildBlock('AL', rd.n, rd.al));
+      var slotAC = document.createElement('div');
+      slotAC.className = 'slot-ac';
+      slotAC.appendChild(buildBlock('AC', rd.n, rd.ac));
+      var slotAR = document.createElement('div');
+      slotAR.className = 'slot-ar';
+      if (rd.ar) slotAR.appendChild(buildBlock('AR', rd.n, rd.ar));
+
+      rowEl.appendChild(slotAL);
+      rowEl.appendChild(leftLabel);
+      rowEl.appendChild(slotAC);
+      rowEl.appendChild(rightLabel);
+      rowEl.appendChild(slotAR);
+      rowsEl.appendChild(rowEl);
+    });
+  }
+
+  function onSeatInput(seatId, inp) {
+    inp.classList.toggle('filled', inp.value.trim().length > 0);
+    seatDirty[seatId] = true;
+    clearTimeout(seatTimers[seatId]);
+    seatTimers[seatId] = setTimeout(function () { flushSeat(seatId, inp); }, 600);
+    if (state !== 'saving') setState('dirty');
+  }
+
+  function flushSeat(seatId, inp) {
+    clearTimeout(seatTimers[seatId]);
+    if (!seatDirty[seatId]) return;
+    var val = inp.value.trim();
+    enqueue('seat:' + seatId, function () {
+      if ((seatRemote[seatId] || '') === val) { seatDirty[seatId] = false; return; }
+      return trackWrite(send({ op: 'seat', id: seatId, v: val })).then(function () {
+        seatRemote[seatId] = val;
+        if (inp.value.trim() === val) seatDirty[seatId] = false;
+      });
+    });
+  }
+
+  function applySeats(remote) {
+    seatRemote = remote;
+    var filled = 0;
+    seatInputs.forEach(function (inp) {
+      var id = inp.dataset.seatId;
+      var v = remote[id] || '';
+      if (v) filled++;
+      if (!seatDirty[id] && inp.value !== v) inp.value = v;
+      inp.classList.toggle('filled', inp.value.trim().length > 0);
+    });
+    $('seatCount').textContent = '입력된 좌석 ' + filled + '석';
+  }
+
+  function buildClasses() {
+    var host = $('classCards');
+    GRADES.forEach(function (g) {
+      var det = document.createElement('details');
+      det.className = 'grade';
+      det.open = true;
+      var sum = document.createElement('summary');
+      var gname = document.createElement('span');
+      gname.className = 'grade-name';
+      gname.textContent = g + '학년';
+      var gsum = document.createElement('span');
+      gsum.className = 'grade-sum';
+      sum.appendChild(gname);
+      sum.appendChild(gsum);
+      var body = document.createElement('div');
+      body.className = 'grade-body';
+      det.appendChild(sum);
+      det.appendChild(body);
+      host.appendChild(det);
+      gradeEls[g] = { sum: gsum };
+      for (var n = 1; n <= CLASS_COUNT[g]; n++) buildClassCard(g, n, body);
+    });
+    updateTotals();
+  }
+
+  function buildClassCard(g, n, body) {
+    var key = 'g' + g + 'c' + n;
+    classState[key] = { enrolled: '', absences: [] };
+
+    var card = document.createElement('div');
+    card.className = 'class-card';
+    var line = document.createElement('div');
+    line.className = 'class-line';
+
+    var name = document.createElement('span');
+    name.className = 'class-name';
+    name.textContent = n + '반';
+
+    var label = document.createElement('label');
+    label.className = 'class-enrolled';
+    label.appendChild(document.createTextNode('재적'));
+    var enrolled = document.createElement('input');
+    enrolled.type = 'number';
+    enrolled.min = '0';
+    enrolled.className = 'enrolled-input';
+    enrolled.id = 'enrolled-' + key;
+    enrolled.setAttribute('aria-label', g + '학년 ' + n + '반 재적수');
+    enrolled.addEventListener('input', function () {
+      classState[key].enrolled = enrolled.value;
+      updateClassPresent(key);
+      scheduleClass(key, false);
+    });
+    enrolled.addEventListener('change', function () { scheduleClass(key, true); });
+    label.appendChild(enrolled);
+
+    var present = document.createElement('div');
+    present.className = 'present';
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'add-absence';
+    add.textContent = '+ 결석';
+    add.setAttribute('aria-label', g + '학년 ' + n + '반 결석 추가');
+
+    line.appendChild(name);
+    line.appendChild(label);
+    line.appendChild(present);
+    line.appendChild(add);
+
+    var list = document.createElement('div');
+    list.className = 'absence-list';
+
+    card.appendChild(line);
+    card.appendChild(list);
+    body.appendChild(card);
+    classEls[key] = { card: card, enrolled: enrolled, present: present, list: list };
+
+    add.addEventListener('click', function () {
+      classState[key].absences.push({ id: '', reason: '' });
+      renderAbsences(key);
+      updateClassPresent(key);
+      scheduleClass(key, false);
+      var ids = list.querySelectorAll('.absence-id');
+      if (ids.length) ids[ids.length - 1].focus();
+    });
+
+    renderAbsences(key);
+    renderPresent(key);
+  }
+
+  function presentCount(key) {
+    var n = parseInt(classState[key].enrolled, 10);
+    if (isNaN(n)) return null;
+    return Math.max(n - classState[key].absences.length, 0);
+  }
+
+  function renderPresent(key) {
+    var p = presentCount(key);
+    var el = classEls[key].present;
+    el.textContent = '';
+    el.appendChild(document.createTextNode('출석 '));
+    var b = document.createElement('b');
+    b.textContent = p === null ? '-' : String(p);
+    el.appendChild(b);
+    el.appendChild(document.createTextNode('명'));
+  }
+
+  function updateClassPresent(key) {
+    renderPresent(key);
+    updateTotals();
+  }
+
+  function updateTotals() {
+    var allE = 0, allP = 0, allAny = false;
+    GRADES.forEach(function (g) {
+      var e = 0, p = 0, any = false;
+      for (var n = 1; n <= CLASS_COUNT[g]; n++) {
+        var key = 'g' + g + 'c' + n;
+        if (!classState[key]) continue;
+        var v = parseInt(classState[key].enrolled, 10);
+        if (isNaN(v)) continue;
+        any = true;
+        e += v;
+        p += presentCount(key);
+      }
+      if (gradeEls[g]) gradeEls[g].sum.textContent = any ? '재적 ' + e + ' · 출석 ' + p : '재적 - · 출석 -';
+      if (any) { allAny = true; allE += e; allP += p; }
+    });
+    $('total').textContent = allAny
+      ? '전교 재적수 ' + allE + '명 · 출석수 ' + allP + '명'
+      : '전교 재적수 - 명 · 출석수 - 명';
+  }
+
+  function renderAbsences(key) {
+    var els = classEls[key];
+    var data = classState[key];
+    var meta = classMeta[key];
+    var tag = meta.g + '학년 ' + meta.n + '반';
+    els.enrolled.value = data.enrolled;
+    els.list.textContent = '';
+    els.list.hidden = data.absences.length === 0;
+    data.absences.forEach(function (absence, idx) {
+      var row = document.createElement('div');
+      row.className = 'absence-row';
+
+      var idInput = document.createElement('input');
+      idInput.type = 'text';
+      idInput.className = 'absence-id';
+      idInput.placeholder = '학번';
+      idInput.maxLength = 6;
+      idInput.setAttribute('inputmode', 'numeric');
+      idInput.setAttribute('aria-label', tag + ' 결석 학번 ' + (idx + 1));
+      idInput.value = absence.id;
+      idInput.readOnly = readOnly;
+      idInput.addEventListener('input', function () { absence.id = idInput.value.trim(); scheduleClass(key, false); });
+      idInput.addEventListener('change', function () { scheduleClass(key, true); });
+
+      var reason = document.createElement('input');
+      reason.type = 'text';
+      reason.className = 'absence-reason';
+      reason.placeholder = '사유';
+      reason.setAttribute('aria-label', tag + ' 결석 사유 ' + (idx + 1));
+      reason.value = absence.reason;
+      reason.readOnly = readOnly;
+      reason.addEventListener('input', function () { absence.reason = reason.value.trim(); scheduleClass(key, false); });
+      reason.addEventListener('change', function () { scheduleClass(key, true); });
+
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'remove-btn';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', tag + ' 결석 ' + (idx + 1) + ' 삭제');
+      remove.addEventListener('click', function () {
+        classState[key].absences.splice(idx, 1);
+        renderAbsences(key);
+        updateClassPresent(key);
+        scheduleClass(key, true);
+      });
+
+      row.appendChild(idInput);
+      row.appendChild(reason);
+      row.appendChild(remove);
+      els.list.appendChild(row);
+    });
+  }
+
+  function scheduleClass(key, immediate) {
+    classDirty[key] = true;
+    classVer[key] = (classVer[key] || 0) + 1;
+    clearTimeout(classTimers[key]);
+    classTimers[key] = setTimeout(function () { flushClass(key); }, immediate ? 0 : 700);
+    if (state !== 'saving') setState('dirty');
+  }
+
+  function flushClass(key) {
+    var ver = classVer[key];
+    enqueue('class:' + key, function () {
+      var s = classState[key];
+      var body = {
+        op: 'class', key: key, enrolled: s.enrolled,
+        absences: s.absences.map(function (a) { return { id: a.id, reason: a.reason }; })
+      };
+      return trackWrite(send(body)).then(function () {
+        if (classVer[key] === ver) classDirty[key] = false;
+      });
+    });
+  }
+
+  function applyClasses(byId) {
+    classKeys.forEach(function (key) {
+      if (classDirty[key]) return;
+      if (classEls[key].card.contains(document.activeElement)) return;
+      var data = byId[key] || {};
+      var enrolled = (typeof data.enrolled === 'string' || typeof data.enrolled === 'number') ? String(data.enrolled) : '';
+      var abs = Array.isArray(data.absences) ? data.absences.map(function (a) {
+        return { id: String((a && a.id) || ''), reason: String((a && a.reason) || '') };
+      }) : [];
+      var cur = classState[key];
+      if (cur.enrolled === enrolled && JSON.stringify(cur.absences) === JSON.stringify(abs)) return;
+      classState[key] = { enrolled: enrolled, absences: abs };
+      renderAbsences(key);
+      renderPresent(key);
+    });
+    updateTotals();
+  }
+
+  notesEl.addEventListener('input', function () {
+    notesDirty = true;
+    notesVer++;
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(flushNotes, 800);
+    if (state !== 'saving') setState('dirty');
+  });
+  notesEl.addEventListener('change', flushNotes);
+
+  function flushNotes() {
+    clearTimeout(notesTimer);
+    if (!notesDirty) return;
+    var ver = notesVer;
+    var text = notesEl.value;
+    enqueue('notes', function () {
+      return trackWrite(send({ op: 'notes', text: text })).then(function () {
+        if (notesVer === ver) notesDirty = false;
+      });
+    });
+  }
+
+  function applyNotes(text) {
+    if (notesDirty || document.activeElement === notesEl) return;
+    text = typeof text === 'string' ? text : '';
+    if (notesEl.value !== text) notesEl.value = text;
+  }
+
+  function csvCell(v) {
+    var s = String(v == null ? '' : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function saveFile(filename, lines) {
+    var blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    setState('saved', '파일을 저장했어요');
+  }
+
+  function exportSeats() {
+    var lines = ['구역,열,좌석,학번'];
+    seatInputs.forEach(function (inp) {
+      var v = inp.value.trim();
+      if (v) lines.push([inp.dataset.section, inp.dataset.row, inp.dataset.seat, v].map(csvCell).join(','));
+    });
+    saveFile('공연장_좌석_학번.csv', lines);
+  }
+
+  function exportAttendance() {
+    var lines = ['학년,반,재적수,출석수,결석 학번,결석 사유'];
+    classKeys.forEach(function (key) {
+      var m = classMeta[key];
+      var s = classState[key];
+      var p = presentCount(key);
+      if (!s.absences.length) {
+        lines.push([m.g + '학년', m.n + '반', s.enrolled, p === null ? '' : p, '', ''].map(csvCell).join(','));
+      } else {
+        s.absences.forEach(function (a, i) {
+          lines.push([
+            i === 0 ? m.g + '학년' : '', i === 0 ? m.n + '반' : '', i === 0 ? s.enrolled : '',
+            i === 0 && p !== null ? p : '', a.id, a.reason
+          ].map(csvCell).join(','));
+        });
+      }
+    });
+    saveFile('학년별_출결현황.csv', lines);
+  }
+
+  var armTimer = null;
+  function onClearClick() {
+    var btn = $('clearBtn');
+    if (!btn.classList.contains('armed')) {
+      btn.classList.add('armed');
+      btn.textContent = '한 번 더 누르면 모두 지워요';
+      armTimer = setTimeout(function () {
+        btn.classList.remove('armed');
+        btn.textContent = '전체 지우기';
+      }, 4000);
+      return;
+    }
+    clearTimeout(armTimer);
+    btn.classList.remove('armed');
+    btn.textContent = '전체 지우기';
+    clearAll();
+  }
+
+  function clearAll() {
+    Object.keys(seatTimers).forEach(function (k) { clearTimeout(seatTimers[k]); });
+    Object.keys(classTimers).forEach(function (k) { clearTimeout(classTimers[k]); });
+    clearTimeout(notesTimer);
+    seatDirty = {};
+    classDirty = {};
+    notesDirty = false;
+    setState('saving', '지우는 중…');
+    send({ op: 'clear' }).then(function () {
+      seatInputs.forEach(function (inp) { inp.value = ''; inp.classList.remove('filled'); });
+      seatRemote = {};
+      classKeys.forEach(function (key) {
+        classState[key] = { enrolled: '', absences: [] };
+        renderAbsences(key);
+        renderPresent(key);
+      });
+      notesEl.value = '';
+      updateTotals();
+      $('seatCount').textContent = '입력된 좌석 0석';
+      setState('saved', '모두 지웠어요');
+    }, function () {
+      showBanner('지우지 못했어요. 다시 시도해 주세요.');
+      setState('error');
+    });
+  }
+
+  // ---- 서버에서 최신 데이터 가져오기 (실시간처럼 보이도록 주기적으로 확인) ----
+  function pull() {
+    if (pollBusy) return Promise.resolve();
+    pollBusy = true;
+    return fetch(API + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) return httpError(r);
+      return r.json();
+    }).then(function (data) {
+      applySeats(data.seats || {});
+      applyClasses(data.classes || {});
+      applyNotes(data.notes || '');
+      if (state === 'connecting' || state === 'offline') { showBanner(''); setState('live'); }
+    }).catch(function (e) {
+      onSubError(e);
+    }).then(function () { pollBusy = false; });
+  }
+
+  // 저장 버튼: 지금 화면의 내용을 한 번에 서버에 저장
+  function saveAll() {
+    var btn = $('saveBtn');
+    btn.disabled = true;
+    Object.keys(seatTimers).forEach(function (k) { clearTimeout(seatTimers[k]); });
+    Object.keys(classTimers).forEach(function (k) { clearTimeout(classTimers[k]); });
+    clearTimeout(notesTimer);
+
+    var seats = {}, del = [];
+    seatInputs.forEach(function (inp) {
+      var id = inp.dataset.seatId, v = inp.value.trim();
+      if (v) seats[id] = v;
+      else if (seatRemote[id]) del.push(id);
+    });
+    var classes = {};
+    classKeys.forEach(function (key) {
+      var s = classState[key];
+      var hasData = String(s.enrolled).trim() !== '' || s.absences.length > 0;
+      if (hasData || classDirty[key]) {
+        classes[key] = {
+          enrolled: s.enrolled,
+          absences: s.absences.map(function (a) { return { id: a.id, reason: a.reason }; })
+        };
+      }
+    });
+    var payload = { op: 'bulk', seats: seats, del: del, classes: classes };
+    if (notesDirty || notesEl.value) payload.notes = notesEl.value;
+
+    setState('saving', '저장 중…');
+    return send(payload).then(function () {
+      Object.keys(seats).forEach(function (id) { seatRemote[id] = seats[id]; });
+      del.forEach(function (id) { delete seatRemote[id]; });
+      seatDirty = {};
+      classDirty = {};
+      notesDirty = false;
+      showBanner('');
+      setState('saved', '저장 완료 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    }, onWriteError).then(function () { btn.disabled = false; });
+  }
+
+  function startPolling() {
+    pull();
+    pollTimer = setInterval(function () { if (!document.hidden) pull(); }, 4000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) pull(); });
+  }
+
+  function init() {
+    buildSeats();
+    buildClasses();
+    $('saveBtn').addEventListener('click', saveAll);
+    $('exportSeats').hidden = false;
+    $('exportAtt').hidden = false;
+    $('clearBtn').hidden = false;
+    $('exportSeats').addEventListener('click', exportSeats);
+    $('exportAtt').addEventListener('click', exportAttendance);
+    $('clearBtn').addEventListener('click', onClearClick);
+    startPolling();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
